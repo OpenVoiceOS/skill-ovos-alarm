@@ -15,6 +15,7 @@
 from datetime import datetime, timedelta
 from os.path import join, abspath, dirname, isfile
 import re
+from signal import alarm
 import time
 
 from alsaaudio import Mixer
@@ -30,6 +31,7 @@ from mycroft.util.parse import extract_datetime, extract_number
 from mycroft.util.time import to_utc, now_local, now_utc
 
 from mycroft.util.time import to_system
+from numpy import equal
 
 from .lib.alarm import (
     alarm_log_dump,
@@ -47,7 +49,6 @@ from .lib.recur import (
     describe_repeat_rule,
 )
 
-MARK_II = "mycroft_mark_2"
 USE_24_HOUR = "full"
 
 # WORKING PHRASES/SEQUENCES:
@@ -104,8 +105,6 @@ class AlarmSkill(MycroftSkill):
             "chimes": 22.0,
         }
 
-        # initialize alarm settings
-        self.init_settings()
         try:
             self.mixer = Mixer()
         except Exception:
@@ -146,9 +145,15 @@ class AlarmSkill(MycroftSkill):
         self.settings.setdefault("sound", self.DEFAULT_SOUND)
         self.settings.setdefault("start_quiet", True)
         self.settings.setdefault("alarm", [])
+        
+        self.gui.register_handler("ovos.alarm.skill.cancel", self.handle_cancel_alarm)
+        self.gui.register_handler("ovos.alarm.skill.snooze", self.handle_snooze_alarm)
 
     def initialize(self):
         """Executed immediately after Skill has been initialized."""
+        # initialize alarm settings
+        self.init_settings()
+
         self.register_entity_file("daytype.entity")  # TODO: Keep?
         self.recurrence_dict = self.translate_namedvalues("recurring")
 
@@ -188,18 +193,31 @@ class AlarmSkill(MycroftSkill):
     def set_alarm(self, when, name=None, repeat=None):
         """Set an alarm at the specified datetime."""
         requested_time = when.replace(second=0, microsecond=0)
+        # Add an index to make tracking alarms easier
+        # First check if there is an alarm at this time
+        # If so, increment the index
+        # If not, set the index to 0
+        
+        index = 0
+        
+        for alarm in self.settings["alarm"]:
+            if alarm["timestamp"] == requested_time:
+                index += 1
+        
         if repeat:
             alarm = create_recurring_rule(requested_time, repeat)
             alarm = {
                 "timestamp": alarm["timestamp"],
                 "repeat_rule": alarm["repeat_rule"],
                 "name": name or "",
+                "index": index,
             }
         else:
             alarm = {
                 "timestamp": to_utc(requested_time).timestamp(),
                 "repeat_rule": "",
                 "name": name or "",
+                "index": index,
             }
 
         for existing in self.settings["alarm"]:
@@ -394,8 +412,11 @@ class AlarmSkill(MycroftSkill):
                     "alarm.scheduled.for.time",
                     data={"time": alarm_nice_time, "rel": reltime},
                 )
+                
+        # Get the alarm index
+        alarm_index = alarm.get("index", "")
 
-        self._show_alarm_ui(alarm_time, name)
+        self._show_alarm_ui(alarm_time, name, alarm_index)
         self._show_alarm_anim(alarm_time)
         self.enclosure.activate_mouth_events()
 
@@ -788,6 +809,7 @@ class AlarmSkill(MycroftSkill):
             "repeat_rule": alarm["repeat_rule"],
             "name": alarm["name"],
             "snooze": original_time,
+            "index": alarm["index"],
         }
         self._schedule()
 
@@ -799,7 +821,107 @@ class AlarmSkill(MycroftSkill):
         settings on home.mycroft.ai.
         """
         self.speak_dialog("alarm.change.sound")
+        
+    @intent_handler("cancel.all.alarms.intent")
+    def handle_cancel_all_alarms(self, _):
+        self.log.info("Cancelling all alarms")
+        self.speak_dialog("alarm.cancelled.multi", data={"count": len(self.settings["alarm"])})
+        self.delete_all_alarms()
+        # Remove the screens from the GUI if they are active
+        self.gui.release()
+        
+    @intent_handler("show.alarms.overview.intent")
+    def handle_show_alarms_overview(self, _):
+        self.log.info("Showing alarms overview")
+        self._show_alarms_overview()
 
+    def delete_alarm_at_index(self, index, context):
+        """Delete an alarm at the specified index."""
+        try:
+            del self.settings["alarm"][index]
+            self._schedule()
+            self.log.info(f"Deleted alarm at index {index}")
+        except IndexError:
+            self.log.info(f"No alarm at index {index}")
+
+        # if alarm context is single alarm, remove the gui
+        if context == "single":
+            self.gui.release()
+        
+        # if alarm context is overview, 
+        # update the gui with the new alarm list if there are any alarms
+        # if there are no alarms, remove the gui
+        elif context == "overview":
+            if len(self.settings["alarm"]) > 0:
+                self._show_alarms_overview()
+            else:
+                self.gui.release()
+            
+    def snooze_alarm_at_index(self, index):
+        """Snooze an alarm at the specified index."""
+        # fisrt find the alarm at the specified index
+        alarms = self.settings["alarm"]
+        for alarm in alarms:
+            if alarm["index"] == index:
+                if "snooze" in alarm:
+                    # already snoozed
+                    original_time = alarm["snooze"]
+                else:
+                    original_time = alarm["timestamp"]
+                snooze = to_utc(get_alarm_local(alarm)) + timedelta(minutes=9)
+                # Update the alarm entry in the settings
+                alarm["timestamp"] = snooze.timestamp()
+                alarm["snooze"] = original_time
+                # replace the alarm entry in the settings with the updated one
+                self.settings["alarm"][self.settings["alarm"].index(alarm)] = alarm 
+                self._schedule()
+                self.log.info(f"Snoozed alarm at index {index}")
+            else:
+                self.log.error("Invalid index for alarm snooze")
+
+    ###########################################################################
+    # GUI Interaction Methods
+    
+    def handle_cancel_alarm(self, message=None):
+        if message.data == None:
+            return
+
+        alarm_name = message.data.get("alarmName", "")
+        alarm_index = message.data.get("alarmIndex", "")
+        alarm_context = message.data.get("alarmContext", "")
+
+        if alarm_index != "":
+            self.log.info("Cancelling alarm at index: " + str(alarm_index))
+            self.delete_alarm_at_index(alarm_index, alarm_context)
+            self.speak_dialog("alarm.cancelled.desc", data={"desc": alarm_name})
+            
+
+    def handle_snooze_alarm(self, message=None):
+        if message.data == None:
+            return
+        
+        alarm_name = message.data.get("alarmName", "")
+        alarm_index = message.data.get("alarmIndex", "")
+        alarm_context = message.data.get("alarmContext", "")
+        
+        if alarm_index != "":
+            self.log.info("Snoozing alarm at index: " + str(alarm_index))
+            self.snooze_alarm_at_index(alarm_index)
+            self.speak_dialog("alarm.snoozed.desc", data={"desc": alarm_name})
+        
+        # if alarm context is single alarm, remove the gui
+        if alarm_context == "single":
+            self.gui.release()
+
+        # if alarm context is overview, 
+        # update the gui with the new alarm list if there are any alarms
+        # if there are no alarms, remove the gui
+        elif alarm_context == "overview":
+            if len(self.settings["alarm"]) > 0:
+                self._show_alarms_overview()
+            else:
+                self.gui.release()
+        
     ##########################################################################
     # Audio and Device Feedback
 
@@ -964,7 +1086,8 @@ class AlarmSkill(MycroftSkill):
         alarm_timestamp = alarm.get("timestamp", "")
         alarm_dt = get_alarm_local(timestamp=alarm_timestamp)
         alarm_name = alarm.get("name", "")
-        self._show_alarm_ui(alarm_dt, alarm_name, alarm_exp=True)
+        alarm_index = alarm.get("index", "")
+        self._show_alarm_ui(alarm_dt, alarm_name, alarm_index, alarm_exp=True)
 
     def __end_flash(self):
         self.cancel_scheduled_event("Flash")
@@ -1038,7 +1161,8 @@ class AlarmSkill(MycroftSkill):
             self.enclosure.mouth_display_png(png, x=x, y=2, refresh=False)
             x += w
 
-    def _show_alarm_ui(self, alarm_dt, alarm_name, alarm_exp=False):
+    def _show_alarm_ui(self, alarm_dt, alarm_name, alarm_index, alarm_exp=False):
+        self.gui.remove_page("AlarmsOverviewCard.qml")
         if self.config_core.get("time_format") == USE_24_HOUR:
             self.gui["alarmTime"] = nice_time(alarm_dt, speech=False,
                                               use_ampm=False)
@@ -1047,14 +1171,55 @@ class AlarmSkill(MycroftSkill):
             alarm_time = nice_time(alarm_dt, speech=False, use_ampm=True)
             self.gui["alarmTime"], self.gui["alarmAmPm"] = alarm_time.split()
         self.gui["alarmName"] = alarm_name.title()
+        if not alarm_name:
+            self.gui["alarmName"] = "Alarm"
         self.gui["alarmExpired"] = alarm_exp
-        override_idle = True if alarm_exp else False
-        platform = self.config_core['enclosure'].get('platform', 'unknown')
-        if platform == MARK_II:
-            page_name = "alarm_mark_ii.qml"
+        self.gui["alarmIndex"] = alarm_index
+        if alarm_exp:
+            override = True
         else:
-            page_name = "alarm_scalable.qml"
-        self.gui.show_page(page_name, override_idle=override_idle)
+            override = 30
+        page_name = "AlarmCard.qml"
+        self.gui.show_page(page_name, override_idle=override)
+        
+    def _show_alarms_overview(self):
+        # Remove all gui before showing the overview
+        self.gui.remove_page("AlarmCard.qml")
+
+        alarms = self.get_active_alarms()
+        self.log.info(alarms)
+        # build an array of alarm objects to pass to the GUI for display
+        alarms_array = []
+        for alarm in alarms:
+            alarm_dt = get_alarm_local(alarm)
+            if self.config_core.get("time_format") == USE_24_HOUR:
+                alarm_time = nice_time(alarm_dt, speech=False, use_ampm=False)
+                alarm_ampm = ""
+            else:
+                alarm_time, alarm_ampm = nice_time(alarm_dt, speech=False, use_ampm=True).split()
+
+            # Check if alarm name is empty
+            if alarm["name"] == "" or alarm["name"] == " ":
+                alarm_name = "Alarm" 
+            else:
+                alarm_name = alarm["name"]
+
+            alarms_array.append({
+                "alarmIndex": alarm.get("index"),
+                "alarmName": alarm_name,
+                "alarmTime": alarm_time,
+                "alarmAmPm": alarm_ampm,
+                "alarmExpired": alarm.get("expired"),
+            })
+            self.log.info(alarms_array)
+
+        self.gui["activeAlarmCount"] = len(alarms_array)
+        self.gui["activeAlarms"] = alarms_array
+
+        # First Check if there is any alarm to display in the List
+        if len(alarms) > 0:            
+            page_name = "AlarmsOverviewCard.qml"
+            self.gui.show_page(page_name, override_idle=True)
 
     ##########################################################################
     # Public Skill API Methods
@@ -1094,3 +1259,4 @@ class AlarmSkill(MycroftSkill):
 def create_skill():
     """Create the Alarm Skill for Mycroft."""
     return AlarmSkill()
+
