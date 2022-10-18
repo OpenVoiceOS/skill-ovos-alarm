@@ -105,6 +105,7 @@ class AlarmSkill(MycroftSkill):
             "chimes": 22.0,
         }
 
+        # TODO - remove usage of mixer, emit proper bus messages for PHAL volume plugin
         try:
             self.mixer = Mixer()
         except Exception:
