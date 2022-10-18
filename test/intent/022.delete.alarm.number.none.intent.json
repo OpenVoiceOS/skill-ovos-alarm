@@ -1,5 +1,0 @@
-{
-    "utterance": "stop alarm number 5",
-    "intent_type": "handle_delete",	
-    "expected_dialog": "alarm.not.found"
-}

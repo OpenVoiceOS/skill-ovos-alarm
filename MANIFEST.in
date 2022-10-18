@@ -4,3 +4,6 @@ recursive-include locale *
 recursive-include res *
 recursive-include ui *
 recursive-include skill *
+recursive-include lib *
+recursive-include sounds *
+recursive-include anim *
