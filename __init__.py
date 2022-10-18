@@ -12,32 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+import time
 from datetime import datetime, timedelta
 from os.path import join, abspath, dirname, isfile
-import re
-from signal import alarm
-import time
-
-from alsaaudio import Mixer
 
 from adapt.intent import IntentBuilder
+from alsaaudio import Mixer
 from mycroft import MycroftSkill, intent_handler
-from mycroft.configuration.config import LocalConf, USER_CONFIG
-from mycroft.messagebus.message import Message
 from mycroft.skills import skill_api_method
 from mycroft.util import play_mp3
-from mycroft.util.format import nice_date_time, nice_time, nice_date, join_list
+from mycroft.util.format import nice_date_time, nice_time, join_list
 from mycroft.util.parse import extract_datetime, extract_number
-from mycroft.util.time import to_utc, now_local, now_utc
-
-from mycroft.util.time import to_system
-from numpy import equal
+from mycroft.util.time import to_system, to_utc, now_local, now_utc
+from mycroft_bus_client.message import Message
+from ovos_config.config import LocalConf
+from ovos_config.locations import USER_CONFIG
 
 from .lib.alarm import (
-    alarm_log_dump,
     curate_alarms,
     get_alarm_local,
-    get_next_repeat,
     has_expired_alarm,
 )
 from .lib.format import nice_relative_time
@@ -50,6 +44,7 @@ from .lib.recur import (
 )
 
 USE_24_HOUR = "full"
+
 
 # WORKING PHRASES/SEQUENCES:
 # Set an alarm
@@ -146,7 +141,7 @@ class AlarmSkill(MycroftSkill):
         self.settings.setdefault("sound", self.DEFAULT_SOUND)
         self.settings.setdefault("start_quiet", True)
         self.settings.setdefault("alarm", [])
-        
+
         self.gui.register_handler("ovos.alarm.skill.cancel", self.handle_cancel_alarm)
         self.gui.register_handler("ovos.alarm.skill.snooze", self.handle_snooze_alarm)
 
@@ -198,13 +193,13 @@ class AlarmSkill(MycroftSkill):
         # First check if there is an alarm at this time
         # If so, increment the index
         # If not, set the index to 0
-        
+
         index = 0
-        
+
         for alarm in self.settings["alarm"]:
             if alarm["timestamp"] == requested_time:
                 index += 1
-        
+
         if repeat:
             alarm = create_recurring_rule(requested_time, repeat)
             alarm = {
@@ -413,7 +408,7 @@ class AlarmSkill(MycroftSkill):
                     "alarm.scheduled.for.time",
                     data={"time": alarm_nice_time, "rel": reltime},
                 )
-                
+
         # Get the alarm index
         alarm_index = alarm.get("index", "")
 
@@ -543,12 +538,12 @@ class AlarmSkill(MycroftSkill):
                 )
 
     def _get_alarm_matches(
-        self,
-        utt,
-        alarm=None,
-        max_results=1,
-        dialog="ask.which.alarm",
-        is_response=False,
+            self,
+            utt,
+            alarm=None,
+            max_results=1,
+            dialog="ask.which.alarm",
+            is_response=False,
     ):
         """Get list of alarms that match based on a user utterance.
         Arguments:
@@ -652,19 +647,19 @@ class AlarmSkill(MycroftSkill):
 
         # Given something to match but no match found
         if (
-            (number and number > len(alarms))
-            or (recur and not recurrence_matches)
-            or (when and not time_matches)
+                (number and number > len(alarms))
+                or (recur and not recurrence_matches)
+                or (when and not time_matches)
         ):
             return (status[2], None)
         # If number of alarms filtered were the same, assume user asked for
         # All alarms
         if (
-            len(alarms) == orig_count
-            and max_results > 1
-            and not number
-            and not when
-            and not recur
+                len(alarms) == orig_count
+                and max_results > 1
+                and not number
+                and not when
+                and not recur
         ):
             return (status[0], alarms)
         # Return immediately if there is ordinal
@@ -742,8 +737,8 @@ class AlarmSkill(MycroftSkill):
             desc = self._describe(alarms[0])
             recurring = ".recurring" if alarms[0]["repeat_rule"] else ""
             if (
-                self.ask_yesno("ask.cancel.desc.alarm" + recurring, data={"desc": desc})
-                == "yes"
+                    self.ask_yesno("ask.cancel.desc.alarm" + recurring, data={"desc": desc})
+                    == "yes"
             ):
                 del self.settings["alarm"][self.settings["alarm"].index(alarms[0])]
                 self._schedule()
@@ -759,8 +754,8 @@ class AlarmSkill(MycroftSkill):
                 return
         elif status in ["Next", "All", "Matched"]:
             if (
-                self.ask_yesno("ask.cancel.alarm.plural", data={"count": total})
-                == "yes"
+                    self.ask_yesno("ask.cancel.alarm.plural", data={"count": total})
+                    == "yes"
             ):
                 self.settings["alarm"] = [
                     a for a in self.settings["alarm"] if a not in alarms
@@ -822,7 +817,7 @@ class AlarmSkill(MycroftSkill):
         settings on home.mycroft.ai.
         """
         self.speak_dialog("alarm.change.sound")
-        
+
     @intent_handler("cancel.all.alarms.intent")
     def handle_cancel_all_alarms(self, _):
         self.log.info("Cancelling all alarms")
@@ -830,7 +825,7 @@ class AlarmSkill(MycroftSkill):
         self.delete_all_alarms()
         # Remove the screens from the GUI if they are active
         self.gui.release()
-        
+
     @intent_handler("show.alarms.overview.intent")
     def handle_show_alarms_overview(self, _):
         self.log.info("Showing alarms overview")
@@ -848,7 +843,7 @@ class AlarmSkill(MycroftSkill):
         # if alarm context is single alarm, remove the gui
         if context == "single":
             self.gui.release()
-        
+
         # if alarm context is overview, 
         # update the gui with the new alarm list if there are any alarms
         # if there are no alarms, remove the gui
@@ -857,7 +852,7 @@ class AlarmSkill(MycroftSkill):
                 self._show_alarms_overview()
             else:
                 self.gui.release()
-            
+
     def snooze_alarm_at_index(self, index):
         """Snooze an alarm at the specified index."""
         # fisrt find the alarm at the specified index
@@ -874,7 +869,7 @@ class AlarmSkill(MycroftSkill):
                 alarm["timestamp"] = snooze.timestamp()
                 alarm["snooze"] = original_time
                 # replace the alarm entry in the settings with the updated one
-                self.settings["alarm"][self.settings["alarm"].index(alarm)] = alarm 
+                self.settings["alarm"][self.settings["alarm"].index(alarm)] = alarm
                 self._schedule()
                 self.log.info(f"Snoozed alarm at index {index}")
             else:
@@ -882,7 +877,7 @@ class AlarmSkill(MycroftSkill):
 
     ###########################################################################
     # GUI Interaction Methods
-    
+
     def handle_cancel_alarm(self, message=None):
         if message.data == None:
             return
@@ -895,21 +890,20 @@ class AlarmSkill(MycroftSkill):
             self.log.info("Cancelling alarm at index: " + str(alarm_index))
             self.delete_alarm_at_index(alarm_index, alarm_context)
             self.speak_dialog("alarm.cancelled.desc", data={"desc": alarm_name})
-            
 
     def handle_snooze_alarm(self, message=None):
         if message.data == None:
             return
-        
+
         alarm_name = message.data.get("alarmName", "")
         alarm_index = message.data.get("alarmIndex", "")
         alarm_context = message.data.get("alarmContext", "")
-        
+
         if alarm_index != "":
             self.log.info("Snoozing alarm at index: " + str(alarm_index))
             self.snooze_alarm_at_index(alarm_index)
             self.speak_dialog("alarm.snoozed.desc", data={"desc": alarm_name})
-        
+
         # if alarm context is single alarm, remove the gui
         if alarm_context == "single":
             self.gui.release()
@@ -922,7 +916,7 @@ class AlarmSkill(MycroftSkill):
                 self._show_alarms_overview()
             else:
                 self.gui.release()
-        
+
     ##########################################################################
     # Audio and Device Feedback
 
@@ -1023,8 +1017,8 @@ class AlarmSkill(MycroftSkill):
             user_config = LocalConf(USER_CONFIG)
 
             if (
-                self.settings["user_beep_setting"] is None
-                and "confirm_listening" in user_config
+                    self.settings["user_beep_setting"] is None
+                    and "confirm_listening" in user_config
             ):
                 del user_config["confirm_listening"]
             else:
@@ -1182,7 +1176,7 @@ class AlarmSkill(MycroftSkill):
             override = 30
         page_name = "AlarmCard.qml"
         self.gui.show_page(page_name, override_idle=override)
-        
+
     def _show_alarms_overview(self):
         # Remove all gui before showing the overview
         self.gui.remove_page("AlarmCard.qml")
@@ -1201,7 +1195,7 @@ class AlarmSkill(MycroftSkill):
 
             # Check if alarm name is empty
             if alarm["name"] == "" or alarm["name"] == " ":
-                alarm_name = "Alarm" 
+                alarm_name = "Alarm"
             else:
                 alarm_name = alarm["name"]
 
@@ -1218,7 +1212,7 @@ class AlarmSkill(MycroftSkill):
         self.gui["activeAlarms"] = alarms_array
 
         # First Check if there is any alarm to display in the List
-        if len(alarms) > 0:            
+        if len(alarms) > 0:
             page_name = "AlarmsOverviewCard.qml"
             self.gui.show_page(page_name, override_idle=True)
 
@@ -1260,4 +1254,3 @@ class AlarmSkill(MycroftSkill):
 def create_skill():
     """Create the Alarm Skill for Mycroft."""
     return AlarmSkill()
-
