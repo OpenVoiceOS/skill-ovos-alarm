@@ -21,13 +21,13 @@ from adapt.intent import IntentBuilder
 from alsaaudio import Mixer
 from mycroft import MycroftSkill, intent_handler
 from mycroft.skills import skill_api_method
-from mycroft.util import play_mp3
 from mycroft.util.format import nice_date_time, nice_time, join_list
 from mycroft.util.parse import extract_datetime, extract_number
 from mycroft.util.time import to_system, to_utc, now_local, now_utc
 from mycroft_bus_client.message import Message
 from ovos_config.config import LocalConf
 from ovos_config.locations import USER_CONFIG
+from ovos_utils.sound import play_mp3
 
 from .lib.alarm import (
     curate_alarms,
