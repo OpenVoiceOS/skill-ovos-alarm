@@ -1,5 +1,0 @@
-{
-    "utterance": "please give all my alarms",
-    "intent_type": "handle_status",
-    "expected_dialog": "alarms.list.multi"
-}

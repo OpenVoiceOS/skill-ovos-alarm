@@ -1,5 +1,0 @@
-{
-    "utterance": "when will my next alarm go off",
-    "intent_type": "handle_status",
-    "expected_dialog": "next.alarm"
-}

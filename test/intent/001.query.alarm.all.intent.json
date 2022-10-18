@@ -1,5 +1,0 @@
-{
-    "utterance": "what are my alarms",
-    "intent_type": "handle_status",
-    "expected_dialog": "alarms.list.single"
-}
