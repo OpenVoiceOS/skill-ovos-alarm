@@ -1,3 +1,6 @@
+## This skill has been archived, use the following skill for the same functionality: https://github.com/NeonGeckoCom/skill-alerts
+
+----------------------------------------------------------------------------------------------------------------------------------
 # <img src='https://raw.githack.com/FortAwesome/Font-Awesome/master/svgs/solid/clock.svg' card_color='#5B6984' width='50' height='50' style='vertical-align:bottom'/> Set alarms
 Set alarms with Mycroft
 
